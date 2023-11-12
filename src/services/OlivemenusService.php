@@ -151,7 +151,7 @@ class OlivemenusService extends Component
             $localHTML = '<div' . $menu_id . ' class="menu' . $menu_class . '">' . $localHTML . '</div>';
         }
 
-        echo $localHTML;
+        return $localHTML;
     }
 
     private function getMenuItemHTML($menu_item, $config): mixed 
@@ -260,20 +260,111 @@ class OlivemenusService extends Component
         }
     }
 
-		/**
-		 * getMenuData
-		 * Gets the menu data from olivemenus as a data instead of HTML.
-		 * This way you can do your own HTML etc in Twig if you want to.
-		 *
-		 * @param  String $handle The handle of the menu item.
-		 * @return Mixed The menu data as an array or a String warning that the menu doesn't exist.
-		 */
-		public function getMenuData($handle) {
-			if ($handle === false || ($menu = $this->getMenuByHandle($handle)) === null) {
-				echo '<p>' . Craft::t('olivemenus', 'A menu with this handle does not exist!') . '</p>';
-				return;
-			}
+    // -====================================================================================================================================
 
-			return Olivemenus::$plugin->olivemenuItems->getMenuItems($menu->id);
-		}
+    public function getMenuArray($handle = false)
+    {
+        if ($handle === false || ($menu = $this->getMenuByHandle($handle)) === null) {
+            return null;
+        }
+
+        $result = [];
+
+        $menuEntries = Olivemenus::$plugin->olivemenuItems->getMenuItems($menu->id);
+        foreach ($menuEntries as $menuEntry) {
+            $result[] = $this->prepareMenuItem($menuEntry);
+        }
+
+        return $result;
+    }
+
+    private function prepareMenuItem($menuEntry)
+    {
+        $menuItemUrl = $this->getMenuItemUrl($menuEntry['custom_url'], $menuEntry['entry_id']);
+        $dataAttributesString = ' ';
+        $dataJson = $menuEntry['data_json'];
+        if ($dataJson) {
+            $dataJson = explode(PHP_EOL, $dataJson);
+            foreach ($dataJson as $dataItem) {
+                $dataItem = explode(':', $dataItem);
+                $dataAttributesString .= trim($dataItem[0]) . '="' . trim($dataItem[1]) . '"';
+            }
+        }
+
+        $isActive = false;
+        $currentActiveUrl = Craft::$app->request->getHostInfo() . Craft::$app->request->getUrl();
+        if ($currentActiveUrl && $menuItemUrl) {
+            $menuItemUrlFiltered = preg_replace('#^https?://#', '', $menuItemUrl);
+            $currentActiveUrl = preg_replace('#^https?://#', '', $currentActiveUrl); // Remove query string
+            if ($currentActiveUrl === $menuItemUrlFiltered) {
+                $isActive = true;
+            }
+        }
+
+        $childMenuItems = [];
+        $childMenuEntries = $menuEntry['children'] ?? null;
+        if ($childMenuEntries) {
+            foreach ($childMenuEntries as $childMenuEntry) {
+                $childMenuItem = $this->prepareMenuItem($childMenuEntry);
+                $childMenuItems[] = $childMenuItem;
+                if ($childMenuItem['isActive']) {
+                    $isActive = true;
+                }
+            }
+        }
+
+        $result = [
+            'id' => $menuEntry['id'],
+            'menuId' => $menuEntry['menu_id'],
+            'parentId' => $menuEntry['parent_id'],
+            'itemOrder' => $menuEntry['item_order'],
+            'name' => $menuEntry['name'],
+            'url' => $menuItemUrl,
+            'class' => $menuEntry['class'],
+            'classParent' => $menuEntry['class_parent'],
+            'dataAttributesString' => $dataAttributesString,
+            'target' => $menuEntry['target'],
+            'isActive' => $isActive,
+            'children' => $childMenuItems,
+        ];
+
+        return $result;
+
+    }
+
+    private function getMenuItemUrl($customUrl, $entryId)
+    {
+        $menuItemUrl = null;
+        if ($customUrl) {
+            $menuItemUrl = $this->replaceEnvironmentVariables($customUrl);
+        } elseif ($entryId) {
+            $entry = Entry::find()->id($entryId)->one();
+            if (!empty($entry)) {
+                $menuItemUrl = $entry->url;
+            } else {
+                $entry = Category::find()->id($entryId)->one();
+                if (!empty($entry)) {
+                    $menuItemUrl = $entry->url;
+                }
+            }
+        }
+        return $menuItemUrl;
+    }
+
+    /**
+     * getMenuData
+     * Gets the menu data from olivemenus as a data instead of HTML.
+     * This way you can do your own HTML etc in Twig if you want to.
+     *
+     * @param  String $handle The handle of the menu item.
+     * @return Mixed The menu data as an array or a String warning that the menu doesn't exist.
+     */
+    public function getMenuData($handle) {
+        if ($handle === false || ($menu = $this->getMenuByHandle($handle)) === null) {
+            echo '<p>' . Craft::t('olivemenus', 'A menu with this handle does not exist!') . '</p>';
+            return;
+        }
+
+        return Olivemenus::$plugin->olivemenuItems->getMenuItems($menu->id);
+    }
 }
